@@ -12,7 +12,16 @@
 # compares each app's tag digest every six hours and soft-redeploys onto a new one, with no
 # warning in game), and a rebuild of unchanged inputs still gets a new digest.
 #
-# What counts, measured on 2026-10-16: steamcmd/steamcmd:ubuntu-24 is republished almost daily,
+# Two things make a scheduled run build NOW (a third waits for the monthly rebuild):
+#   1. a security update for a package the server really runs on is waiting (below), or
+#   2. main has commits the published image does not have: the published :latest records the commit
+#      it was built from (label org.opencontainers.image.revision), and at least one commit since
+#      then touches an image INPUT (the Dockerfile, VERSION, every path a COPY/ADD takes). README,
+#      tests and .github changes do not count. A published image with no revision label counts as
+#      pending (one extra rebuild, after which it is labelled). Needs the full git history
+#      (actions/checkout fetch-depth: 0).
+#
+# What counts for 1., measured on 2026-10-16: steamcmd/steamcmd:ubuntu-24 is republished almost daily,
 # and an image published that morning already had security updates waiting, for libsystemd0 and
 # libudev1, which nothing in a game server's container uses. Building on every such change would
 # restart every server every week again. So:
@@ -48,10 +57,13 @@ monthly=false
 now=()
 later=()
 
-# The label of the published image (one platform, or the amd64 entry of a multi-platform one).
-recorded="$(docker buildx imagetools inspect "${image}:latest" --format '{{json .Image}}' 2>/dev/null \
-  | jq -r 'if has("config") then . else ([to_entries[] | select(.key | test("amd64")) | .value][0] // {}) end
-           | .config.Labels["org.opencontainers.image.base.digest"] // empty' || true)"
+# A label of the published image (one platform, or the amd64 entry of a multi-platform one).
+published_label() {
+  docker buildx imagetools inspect "${image}:latest" --format '{{json .Image}}' 2>/dev/null \
+    | jq -r --arg k "$1" 'if has("config") then . else ([to_entries[] | select(.key | test("amd64")) | .value][0] // {}) end
+                          | .config.Labels[$k] // empty' || true
+}
+recorded="$(published_label org.opencontainers.image.base.digest)"
 if [ -z "${recorded}" ]; then
   echo "the published ${image}:latest records no base digest (built before this check)"
   later+=("the base digest of the published image is not recorded")
@@ -60,6 +72,40 @@ elif [ "${recorded}" != "${base_digest}" ]; then
 else
   echo "the base has not moved since the published image"
 fi
+
+# Commits on main the published image does not have (2. above).
+head_sha="$(git rev-parse HEAD)"
+revision="$(published_label org.opencontainers.image.revision)"
+pending=false
+inputs=(Dockerfile VERSION)
+while read -r line; do
+  read -ra words <<<"${line}"
+  words=("${words[@]:1}")
+  sources=()
+  for w in "${words[@]}"; do
+    [[ "${w}" == --* ]] || sources+=("${w}")
+  done
+  unset 'sources[${#sources[@]}-1]'
+  inputs+=("${sources[@]}")
+done < <(grep -E '^(COPY|ADD)[[:space:]]' Dockerfile | grep -v -- '--from=' || true)
+if [ -z "${revision}" ]; then
+  pending=true
+  now+=("the published image records no revision (built before this check): pending")
+elif [ "${revision}" = "${head_sha}" ]; then
+  echo "the published image was built from HEAD (${head_sha:0:12})"
+elif ! git cat-file -e "${revision}^{commit}" 2>/dev/null; then
+  pending=true
+  now+=("the published revision ${revision:0:12} is not in this checkout's history: pending")
+else
+  ahead="$(git rev-list --count "${revision}..${head_sha}" -- "${inputs[@]}")"
+  if [ "${ahead}" -gt 0 ]; then
+    pending=true
+    now+=("${ahead} commit(s) since the published ${revision:0:12} touch the image inputs (${inputs[*]})")
+  else
+    echo "no commit since the published ${revision:0:12} touches the image inputs (${inputs[*]})"
+  fi
+fi
+echo "pending=${pending}"
 
 # Updates the published image is missing, as root (the image may run as another user).
 # "Inst <package> [<installed>] (<candidate> <origin> ..." per package.

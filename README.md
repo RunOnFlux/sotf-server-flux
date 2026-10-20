@@ -20,7 +20,7 @@ game's files and is the hub's CLI.
 
 | Path | What | Flux mount |
 |---|---|---|
-| `/mnt/sotf/server` | game install (3.2 GB), Wine prefix (`flux-wine`), game logs | `ml:` (local, never synced) |
+| `/mnt/sotf/server` | game install (3.2 GB), Wine prefix (`flux-wine`), game logs | `ml:` (local, never synced) Also `flux-logs/flux.log` (our supervisor log, 5 MB then one `.1`): local, never synced. |
 | `/mnt/sotf/data` | `userdata/` (saves, `dedicatedserver.cfg`, `ownerswhitelist.txt`), `flux/` (state, backups) | `g:` primary |
 
 ## Ports (UDP)
@@ -80,3 +80,4 @@ world loaded. Install 3.2 GB + 0.6 GB prefix. Image 1.37 GB.
 ## Versions
 
 - 1.0.0: first release.
+- 1.0.1 (2026-10-20): `flux.log` moved off the synced data volume to `/mnt/sotf/server/flux-logs/flux.log` (5 MB, one `.1`; an old one is moved there once); start-up banner; the weekly rebuild only when it has something to apply.

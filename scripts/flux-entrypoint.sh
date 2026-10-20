@@ -55,6 +55,9 @@ sotf() { python3 /opt/flux/fluxsotf.py "$@"; }
 
 rm -f "${FLUX_RESTART_MARKER}"
 mkdir -p "${s}" "${FLUX_USERDATA}" "${FLUX_STATE_DIR}" "${FLUX_GAME_LOG_DIR}"
+# An older image kept flux.log on the synced data volume: move it here, once.
+flux_log_migrate "${FLUX_STATE_DIR}/flux.log"
+flux_banner "Sons Of The Forest"
 
 if ! restart_at="$(flux_restart_time "${SOTF_RESTART_TIME:-}")"; then
   flux_log "WARN SOTF_RESTART_TIME='${SOTF_RESTART_TIME}' is not HH:MM; no daily restart"
@@ -301,6 +304,7 @@ start_generation() {
 
   userdata="$(flux_wine_path "${FLUX_USERDATA}")"
   sotf state starting "Loading the world"
+  flux_banner "Sons Of The Forest"
   flux_log "starting the server (generation ${generation})"
 
   log_follower "${current}" &

@@ -47,3 +47,5 @@ A real-game test (heavy: ~7 GB RAM) needs the install volume: see README "Measur
 - **A state file left by a killed container** is reset to `updating` at the start of every generation.
 - **No console, no RCON.** Players come from A2S on the query port (which answers with a challenge first).
 - **Empty env = unset.** Flux stops a container with Docker's default 10 seconds.
+- **`flux.log` is local** (`$FLUX_SERVER_DIR/flux-logs/flux.log`, 5 MB then one `.1`), never on the synced data volume: a constantly written file there is constant Syncthing traffic. `flux_log_migrate` moves an old one off the data volume at start. `flux_banner` prints the FluxCloud banner at container start and every generation; its text is tested.
+- **The scheduled CI run publishes only with something to apply** (`.github/ci/needs-rebuild.sh`): urgent security updates, or commits on main since the published `:latest` (label `org.opencontainers.image.revision`) that touch the image inputs.
