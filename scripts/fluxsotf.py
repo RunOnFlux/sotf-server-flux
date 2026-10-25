@@ -811,15 +811,59 @@ def _safe_members(z):
     return members
 
 
+TRANSFER_DIRS = ("uploads", "exports")
+TRANSFER_MAX_AGE = 3600
+
+
+def prune_transfers(keep=None):
+    """The panel's uploads and exports are on the synced data volume, so a leftover (a failed upload,
+    a download taken) is replicated for nothing: remove what is older than an hour, never `keep`."""
+    keep = os.path.abspath(keep) if keep else None
+    cutoff = time.time() - TRANSFER_MAX_AGE
+    for sub in TRANSFER_DIRS:
+        base = os.path.join(STATE_DIR, sub)
+        try:
+            names = os.listdir(base)
+        except OSError:
+            continue
+        for name in names:
+            path = os.path.join(base, name)
+            try:
+                if os.path.abspath(path) != keep and os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+            except OSError:
+                pass
+
+
+def drop_upload(src):
+    """The uploaded zip is of no use once an import has been tried: the panel uploads again on a retry."""
+    try:
+        if os.path.abspath(os.path.dirname(src)) == os.path.join(os.path.abspath(STATE_DIR), "uploads"):
+            os.remove(src)
+    except OSError:
+        pass
+
+
 def cmd_import_save(args):
     if len(args) < 2:
         fail("usage: import-save <zip> <slot>", 64)
     src, slot = args[0], slot_number(args[1])
+    prune_transfers(keep=src)
     if slot is None:
+        drop_upload(src)
         fail(f"a slot is a number from 1 to {MAX_SLOT}")
     d = slot_dir(slot)
-    if os.path.isdir(d) and os.listdir(d):
+    # The slot the server is playing is not an empty slot: its next save would replace the upload.
+    config = read_json(CONFIG_FILE, {}) or {}
+    up = load_state().get("state") in ("running", "starting")
+    if slot == running_slot() or (up and slot == config.get("SaveSlot")):
+        drop_upload(src)
+        fail("That is the slot the server plays. Pick another empty slot, import there, then press Play on it.")
+    if os.path.isfile(os.path.join(d, "SaveData.zip")) or os.path.isdir(d) and any(os.path.isdir(os.path.join(d, n)) for n in os.listdir(d)):
+        drop_upload(src)
         fail("That slot already has a world. Pick an empty slot (or delete that one first).")
+    # A folder with no SaveData.zip is the leftover of a world that was never made: clear it.
+    shutil.rmtree(d, ignore_errors=True)
     try:
         with zipfile.ZipFile(src) as z:
             members = _safe_members(z)
@@ -847,10 +891,12 @@ def cmd_import_save(args):
                 kind = "save folder"
     except (OSError, ValueError, zipfile.BadZipFile) as e:
         shutil.rmtree(d, ignore_errors=True)
+        drop_upload(src)
         fail(str(e) if isinstance(e, ValueError) else f"the file is not a usable zip: {e}")
     summary = save_summary(d)
     if summary.get("damaged") or not summary.get("exists"):
         shutil.rmtree(d, ignore_errors=True)
+        drop_upload(src)
         fail("The save could not be read (SaveData.zip is damaged).")
     try:
         os.remove(src)
@@ -866,6 +912,7 @@ def cmd_export_save(args):
     if slot is None or not os.path.isdir(slot_dir(slot)):
         fail("That slot has no world.")
     dest = args[1]
+    prune_transfers(keep=dest)
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
     folder = f"{slot:010d}"
     with zipfile.ZipFile(dest + ".part", "w", zipfile.ZIP_DEFLATED) as z:
@@ -1244,6 +1291,7 @@ def cmd_apply(_args):
     state = load_state()
     state["slot"] = config.get("SaveSlot")
     write_json(STATE_FILE, state)
+    prune_transfers()
 
 
 COMMANDS = {

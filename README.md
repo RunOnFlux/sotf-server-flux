@@ -81,3 +81,4 @@ world loaded. Install 3.2 GB + 0.6 GB prefix. Image 1.37 GB.
 
 - 1.0.0: first release.
 - 1.0.1 (2026-10-20): `flux.log` moved off the synced data volume to `/mnt/sotf/server/flux-logs/flux.log` (5 MB, one `.1`; an old one is moved there once); start-up banner; the weekly rebuild only when it has something to apply.
+- 1.0.2 (2026-10-25): the panel's uploads and exports on the data volume are pruned (a failed import removes its upload, anything over an hour old goes at the next export, import and start); `import-save` takes a slot folder that holds no `SaveData.zip` (a world that was never made) and refuses the slot the server is playing.

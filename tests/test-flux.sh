@@ -208,6 +208,25 @@ python3 -c 'import zipfile,sys
 with zipfile.ZipFile(sys.argv[1],"w") as z: z.writestr("../../evil/SaveData.zip","x")' "${tmp}/evil.zip"
 check "a path out of the folder is refused" "1" "$(status sotf import-save "${tmp}/evil.zip" 9)"
 
+# A failed import takes its upload with it, and a leftover folder is not a world.
+mkdir -p "${data}/flux/uploads" "${data}/flux/exports"
+cp "${tmp}/junk.zip" "${data}/flux/uploads/failed.zip"
+check "a failed import in the uploads folder removes the upload" "1" "$(status sotf import-save "${data}/flux/uploads/failed.zip" 9 >/dev/null; status test -e "${data}/flux/uploads/failed.zip")"
+mkdir -p "${data}/userdata/Saves/DedicatedServer/Multiplayer/0000000011"
+echo leftover >"${data}/userdata/Saves/DedicatedServer/Multiplayer/0000000011/Other.json"
+cp "${tmp}/out/slot5.zip" "${tmp}/half.zip"
+check "a slot folder with no SaveData.zip takes an import" "save folder" "$(sotf import-save "${tmp}/half.zip" 11 | jget kind)"
+check "and the leftover is gone" "1" "$(status test -e "${data}/userdata/Saves/DedicatedServer/Multiplayer/0000000011/Other.json")"
+echo '{"state": "running", "slot": 3}' >"${data}/flux/state.json"
+cp "${tmp}/out/slot5.zip" "${tmp}/active.zip"
+check "the slot the server plays is refused" "1" "$(status sotf import-save "${tmp}/active.zip" 3)"
+sotf state running
+touch -d '2 hours ago' "${data}/flux/uploads/old.zip" "${data}/flux/exports/old.zip"
+touch "${data}/flux/uploads/new.zip" "${data}/flux/exports/new.zip"
+sotf export-save 5 "${data}/flux/exports/slot5.zip" >/dev/null
+check "an hour-old upload and export are pruned" "1 1" "$(status test -e "${data}/flux/uploads/old.zip") $(status test -e "${data}/flux/exports/old.zip")"
+check "a fresh one and the export being made are kept" "0 0 0" "$(status test -e "${data}/flux/uploads/new.zip") $(status test -e "${data}/flux/exports/new.zip") $(status test -e "${data}/flux/exports/slot5.zip")"
+
 # State, status and restart.
 sotf state starting
 check "starting moves the generation" "1" "$(sotf status | jget generation)"
