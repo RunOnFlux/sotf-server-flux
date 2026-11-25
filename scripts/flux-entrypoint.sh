@@ -117,7 +117,19 @@ ensure_prefix() {
 }
 
 update_server() {
-  local attempt validate
+  local attempt validate steam_home
+  # SteamCMD's depotcache onto the INSTALL volume (local to the node, never synced). It holds the manifests of
+  # the installed build, which the NEXT update needs and which Steam refuses to an anonymous login once a build
+  # is old; in the container's own layer they are lost on every redeploy and the first update after it fails
+  # with "state is 0x6 after update job" (Icarus, Rust, DST). The fresh-install fallback of those images is
+  # not ported here yet.
+  steam_home="${HOME:-/root}/.local/share/Steam"
+  mkdir -p "${s}/flux-steam/depotcache" "${steam_home}"
+  if [ ! -L "${steam_home}/depotcache" ]; then
+    [ -d "${steam_home}/depotcache" ] && cp -an "${steam_home}/depotcache/." "${s}/flux-steam/depotcache/" 2>/dev/null
+    rm -rf "${steam_home}/depotcache"
+    ln -s "${s}/flux-steam/depotcache" "${steam_home}/depotcache"
+  fi
   if flux_truthy "${SKIP_UPDATE:-}" && [ -f "${s}/${FLUX_GAME_EXE}" ]; then
     flux_log "SKIP_UPDATE is set: not updating the server files"
     return 0
@@ -128,6 +140,7 @@ update_server() {
   # install that is actually broken fails the first attempt, and every retry validates.
   validate=""
   for attempt in 1 2 3 4 5; do
+    [ "${terminating}" = "1" ] && return 2
     # app_info_update + a second app_update: SteamCMD answers "Missing configuration" to a first
     # app_update of this app on a fresh SteamCMD (measured 2026-10-18), and stops there.
     # shellcheck disable=SC2086  # validate is "" or "validate"
@@ -140,7 +153,13 @@ update_server() {
       flux_log "server build $(flux_installed_build "${s}/steamapps/appmanifest_${FLUX_STEAM_APP}.acf")"
       return 0
     fi
-    [ "${terminating}" = "1" ] && return 1
+    [ "${terminating}" = "1" ] && return 2
+    if grep -aqE "state is 0x6( |$)" /tmp/steamcmd.log; then
+      # Steam will not hand an old build's manifests to an anonymous login: neither a retry nor `validate`
+      # gets past it. Start what is installed instead of four more attempts.
+      flux_log "WARN Steam no longer serves the installed build's manifests (state is 0x6): not retrying"
+      break
+    fi
     validate="validate"
     flux_log "WARN steamcmd failed (attempt ${attempt}/5): $(grep -aE 'ERROR|Error|error' /tmp/steamcmd.log | tail -2 | tr '\n' ' ')retrying in 5s with validate"
     sleep 5 &
@@ -268,7 +287,8 @@ start_generation() {
   # A state left by the container that was here before (a kill, a node reboot) is stale from now on.
   sotf state updating "Preparing the server"
 
-  update_server || return 1
+  update_server
+  case $? in 0) ;; 2) return 2 ;; *) return 1 ;; esac
   while IFS= read -r line; do flux_log "${line#\# }"; done < <(sotf update-check 2>&1)
   [ "${terminating}" = "1" ] && return 2
   # A restore the panel asked for, before anything reads the server's files.
