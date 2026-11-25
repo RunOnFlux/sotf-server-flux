@@ -50,6 +50,9 @@ while [ $# -gt 0 ]; do
   shift
 done
 [ -n "${dir}" ] || exit 0
+echo "app_update" >>/tmp/steamcmd-calls
+if [ -f /tmp/.slow ]; then sleep 60; exit 8; fi
+if [ -f /tmp/.fake-0x6 ]; then echo "Error! App '2465200' state is 0x6 after update job."; exit 8; fi
 mkdir -p "${dir}/steamapps"
 : >"${dir}/SonsOfTheForestDS.exe"
 printf '"AppState"\n{\n\t"buildid"\t\t"100"\n}\n' >"${dir}/steamapps/appmanifest_2465200.acf"
@@ -135,6 +138,32 @@ check "a stop ends the supervisor" "0" "$(status wait_for '! kill -0 ${entry} 2>
 check "inside Docker's 10 seconds although the game takes 6 after its save" "0" "$(status test $(($(date +%s) - start)) -le 5)"
 check "and saves the world" "0" "$(status grep -q 'save quit' ${data}/userdata/Saves/DedicatedServer/Multiplayer/0000000002/SaveData.zip)"
 check "and says stopped" "stopped" "$(python3 -c 'import json;print(json.load(open("'"${data}"'/flux/state.json"))["state"])')"
+
+# Steam answers "state is 0x6" for an install that is there: not retried, the installed build starts.
+check "the depotcache is on the install volume" "/mnt/sotf/server/flux-steam/depotcache" "$(readlink "${HOME:-/root}/.local/share/Steam/depotcache")"
+: >/tmp/.fake-0x6
+: >/tmp/steamcmd-calls
+STANDIN_PLAYER='' /opt/flux/flux-entrypoint.sh >/tmp/entry6.log 2>&1 &
+entry6=$!
+check "a 0x6 update starts the installed build" "0" "$(status wait_for 'grep -q "starting the build already installed" /tmp/entry6.log' 40)"
+check "after ONE steamcmd call, not five" "1" "$(wc -l </tmp/steamcmd-calls)"
+kill -TERM "${entry6}"
+wait_for '! kill -0 ${entry6} 2>/dev/null' 15
+rm -f /tmp/.fake-0x6
+
+# A stop while SteamCMD is still downloading: stopped, not a crash, quickly.
+: >/tmp/.slow
+STANDIN_PLAYER='' /opt/flux/flux-entrypoint.sh >/tmp/entry5.log 2>&1 &
+entry5=$!
+wait_for 'grep -q "updating the server from Steam" /tmp/entry5.log' 20
+start="$(date +%s)"
+kill -TERM "${entry5}"
+check "a stop during the download ends the supervisor" "0" "$(status wait_for '! kill -0 ${entry5} 2>/dev/null' 10)"
+check "inside Docker's 10 seconds" "0" "$(status test $(($(date +%s) - start)) -le 6)"
+check "as stopped, not crashed" "stopped" "$(python3 -c 'import json;print(json.load(open("'"${data}"'/flux/state.json"))["state"])')"
+check "and not as an error" "0" "$(grep -c 'could not be prepared' /tmp/entry5.log)"
+pkill -f 'sleep 60' 2>/dev/null
+rm -f /tmp/.slow
 
 # A port the server cannot use is not a crash: the state says what to change and nothing restarts.
 SOTF_GAME_PORT=80 /opt/flux/flux-entrypoint.sh >/tmp/entry2.log 2>&1 &

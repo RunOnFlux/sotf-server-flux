@@ -384,6 +384,13 @@ def apply_env(config, notes, created):
     changed = False
     for name, key in ENV_KEYS.items():
         if not env_set(name):
+            # A join password the owner HAD set through this variable and then emptied is removed; a variable that
+            # was never set (the marketplace writes every declared parameter blank) wipes nothing.
+            if name == "SOTF_PASSWORD" and str(applied.get(name, "")).strip() != "" and config.get("Password"):
+                config["Password"] = ""
+                notes.append("Password = (none) (SOTF_PASSWORD emptied)")
+                applied[name] = ""
+                changed = True
             continue
         raw = os.environ[name]
         if not created and applied.get(name) == raw:

@@ -36,6 +36,12 @@ check "restart time 24:00 refused" "1" "$(status flux_restart_time 24:00)"
 # 2026-10-11 12:00 UTC = 1791720000
 check "next 05:00 after noon is tomorrow" "$((1791720000 - 43200 + 86400 + 18000))" "$(flux_next_daily 1791720000 05:00)"
 check "next 13:30 after noon is today" "$((1791720000 + 5400))" "$(flux_next_daily 1791720000 13:30)"
+# Clock changes (Europe/Lisbon, 2026): 10-25 a 25 h day, 03-29 a 23 h day; New York 2027-03-14 skips 02:00-03:00.
+lis() { TZ=Europe/Lisbon date -d "@$(TZ=Europe/Lisbon flux_next_daily "$(TZ=Europe/Lisbon date -d "$1" +%s)" "$2")" '+%F %H:%M'; }
+check "the 25-hour day: 00:15 passed, the next is tomorrow's, not a repeat an hour on" "2026-10-26 00:15" "$(lis '2026-10-25 00:30' 00:15)"
+check "the 23-hour day: 23:30 asking for 23:00 gets the next day, not a skipped one" "2026-03-29 23:00" "$(lis '2026-03-28 23:30' 23:00)"
+ny() { TZ=America/New_York date -d "@$(TZ=America/New_York flux_next_daily "$(TZ=America/New_York date -d "$1" +%s)" "$2")" '+%F %H:%M'; }
+check "a time the clocks skip is taken an hour later, not turned off" "2027-03-14 03:30" "$(ny '2027-03-13 20:00' 02:30)"
 check "the wine path of a folder" 'Z:\mnt\sotf\data\userdata' "$(flux_wine_path /mnt/sotf/data/userdata)"
 
 # --- Restart budget ----------------------------------------------------------------------------
@@ -95,6 +101,13 @@ check "the same env does not undo the panel" "Panel Name 6" "$(cfg ServerName) $
 sotf SOTF_SERVER_NAME="Forest Two" SOTF_MAX_PLAYERS=4 SOTF_GAME_PORT=31000 SOTF_QUERY_PORT=31001 SOTF_BLOBSYNC_PORT=31002 apply >/dev/null
 check "a changed env value applies" "Forest Two" "$(cfg ServerName)"
 check "an empty env value leaves the file" "Hard" "$(sotf SOTF_GAME_MODE= SOTF_GAME_PORT=31000 SOTF_QUERY_PORT=31001 SOTF_BLOBSYNC_PORT=31002 apply >/dev/null; cfg GameMode)"
+check "a join password set through the env is in the file" "pw" "$(sotf SOTF_PASSWORD=pw SOTF_GAME_PORT=31000 SOTF_QUERY_PORT=31001 SOTF_BLOBSYNC_PORT=31002 apply >/dev/null; cfg Password)"
+check "the same variable emptied removes it" "" "$(sotf SOTF_PASSWORD= SOTF_GAME_PORT=31000 SOTF_QUERY_PORT=31001 SOTF_BLOBSYNC_PORT=31002 apply >/dev/null; cfg Password)"
+check "and a blank that was never set wipes nothing" "kept" "$(sotf set-settings '{"ServerName": "x"}' >/dev/null; python3 - "${data}/userdata/dedicatedserver.cfg" <<'PY'
+import json,sys
+d=json.load(open(sys.argv[1])); d["Password"]="kept"; json.dump(d,open(sys.argv[1],"w"))
+PY
+sotf SOTF_PASSWORD= SOTF_GAME_PORT=31000 SOTF_QUERY_PORT=31001 SOTF_BLOBSYNC_PORT=31002 apply >/dev/null; cfg Password)"
 check "ports that clash are refused" "2" "$(status sotf SOTF_GAME_PORT=31000 SOTF_QUERY_PORT=31000 apply)"
 check "a port below 1024 is refused" "2" "$(status sotf SOTF_GAME_PORT=80 apply)"
 sotf SOTF_GAME_PORT=31000 SOTF_QUERY_PORT=31001 SOTF_BLOBSYNC_PORT=31002 apply >/dev/null
